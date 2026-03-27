@@ -136,9 +136,9 @@ See [docs/tech-decisions.md](docs/tech-decisions.md) for detailed ADR excerpts.
 | Phase | Status | Description |
 |-------|--------|-------------|
 | Phases 1–19 | ✅ | Core RAG, hybrid search, reranking, multi-source tools, streaming UX |
-| Multi-Tenant B2B | 🟡 | Architecture designed, RLS implemented, onboarding flow in progress |
+| Multi-Tenant B2B | ✅ | Architecture designed, RLS policies implemented, tenant isolation verified |
 | MCP Server | ✅ | Model Context Protocol server functional |
-| Staff Mode | 🟡 | Role-based permissions designed, inventory management in progress |
+| Staff Mode | ✅ | Role-based permissions, inventory management, analytics dashboard |
 
 ---
 
