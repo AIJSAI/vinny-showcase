@@ -1,6 +1,6 @@
-# Vinny — AI Wine Concierge
+# Vinny — AI Beverage Concierge
 
-> Multi-source RAG wine recommendation engine with hybrid search, conversational UX, and multi-tenant B2B SaaS architecture.
+> Multi-source RAG beverage recommendation engine with hybrid search, multi-category data model (wine, beer, spirits, cocktails), cross-category food pairings, conversational UX, and multi-tenant B2B SaaS architecture.
 
 ---
 
@@ -69,7 +69,8 @@ flowchart LR
 |-----------|----------|
 | **Hybrid Search** | pgvector (semantic) + tsvector (keyword) fused via RRF — catches both conceptual queries ("bold Italian red") and exact lookups ("2019 Barolo") |
 | **Reranking** | Cohere rerank-v3.5 re-scores the fused candidate list by query relevance, boosting precision in top-k |
-| **Multi-Source Tools** | Grapeminds API (wine database), Tavily (web search), MCP server (extensible tool protocol) |
+| **Multi-Category Schema** | Separate `wines`, `beers`, `spirits`, `cocktails` tables (each with its own HNSW index and hybrid search RPC) — vector spaces stay semantically coherent, RPCs stay type-safe, schemas evolve independently |
+| **Multi-Source Tools** | Grapeminds (wine), WineVybe (beer + spirits), TheCocktailDB, Open Brewery DB, Tavily web search, MCP server (extensible tool protocol) |
 | **Streaming UX** | Vercel AI SDK `streamText` for token-by-token responses with tool call interleaving |
 
 ## Tech Stack
@@ -85,7 +86,10 @@ flowchart LR
 | Cohere rerank-v3.5 | Search reranking | Dedicated relevance model, improves precision over raw fusion scores |
 | Upstash Redis | Rate limiting + caching | Serverless Redis, per-user rate limits, conversation context cache |
 | Grapeminds API | Wine data source | Curated wine database with pricing, reviews, and tasting notes |
-| Tavily | Web search | Real-time web results for questions beyond the wine database |
+| WineVybe API | Beer + spirits data | Primary source of record for beer (IBU/SRM/style) and spirits (proof/age/cask) catalog data |
+| TheCocktailDB | Cocktail data | Multi-ingredient filtering, glassware, technique, family |
+| Open Brewery DB | Brewery metadata | 9,527 breweries, free, no auth |
+| Tavily | Web search | Real-time web results for questions beyond the local catalog |
 | MCP Server | Tool protocol | Model Context Protocol for extensible tool integration |
 | Zod v4 | Schema validation | Runtime validation of API responses, tool parameters, and config |
 
@@ -109,6 +113,12 @@ flowchart LR
 
 **Solution**: Iterative index scans with RLS (ADR-009). Supabase Row-Level Security policies filter at the database level. The hybrid search function applies `tenant_id` filters within the search query itself, not as a post-filter. Combined with connection-level RLS context (`set_config('app.tenant_id', ...)`), isolation is enforced at every layer.
 
+### 4. Multi-Category Without a Polymorphic Mess
+
+**Challenge**: Phase 17 expanded Vinny from wine-only to wine + beer + spirits + cocktails. The naive design is a polymorphic `beverages` table with a category discriminator and a wide column set. That approach falls apart fast: wine has 15+ wine-specific columns (`points`, `variety`, `winery`, `body`, `acidity`, `harmonize`), beer needs `ibu`/`srm`/`style`, spirits need `proof`/`age_statement`/`cask_type`, cocktails need `ingredients` JSONB, `technique`, `glassware`, `family`. A unified table ends up with 50+ mostly-NULL columns and degraded index efficiency. Worse, a unified HNSW index mixes wine vectors into "hoppy IPA" candidate sets, degrading recall.
+
+**Solution**: Separate tables per category (ADR-014). `wines`, `beers`, `spirits`, `cocktails` each get typed columns, dedicated HNSW vector indexes, GIN FTS indexes, and category-specific hybrid search RPCs. Vector spaces stay semantically coherent. RPCs stay type-safe. Cross-category queries (e.g., "what pairs with steak?") are handled by the `search_beverage_pairings` RPC against a `food_pairings` table unified by a `beverage_domain` column. The LLM sees one `search_beverages` tool with a category discriminator; the backend fans out. Tenant-scoped `enabledCategories` config gates which categories each tenant exposes. Migration is purely additive — the existing `wines` table and `hybrid_search_wines` RPC are never touched.
+
 ## Key Decisions
 
 | ADR | Decision | Rationale |
@@ -119,26 +129,35 @@ flowchart LR
 | ADR-009 | Multi-Tenant Data Model | Row-Level Security + tenant_id partitioning for B2B SaaS isolation |
 | ADR-011 | Consumer Anonymous Access | Guest users get rate-limited access without auth; conversion funnel optimization |
 | ADR-012 | Staff Mode | Restaurant staff get elevated access (inventory management, analytics) via role-based permissions |
+| ADR-013 | Integration Hub Strategy (don't build middleware) | Design clean API surfaces (OpenAPI + webhooks + OAuth2) so Vinny plugs into Olo/Toast/Provi via existing hubs instead of becoming one |
+| ADR-014 | Multi-Category Schema (separate tables) | Polymorphic `beverages` would collapse under column divergence; separate tables preserve vector-space coherence, RPC type safety, and additive migrations |
 
 See [docs/tech-decisions.md](docs/tech-decisions.md) for detailed ADR excerpts.
 
 ## Results
 
-- **19 development phases** completed
-- **107K+ data sources** integrated (wine reviews, tasting notes, pricing)
+- **21 development phases** complete plus Phase 17 multi-category in active rollout
+- **107K+ wine reviews + 100K+ wine catalog + 5K+ food pairings** plus beer, spirits, and cocktail catalogs ingested through Phase 17
 - **Hybrid search pipeline** with measured precision improvements over vector-only
+- **Multi-category data model** — separate `wines`/`beers`/`spirits`/`cocktails` tables with dedicated HNSW indexes and per-category hybrid search RPCs
 - **MCP server** for extensible tool integration
 - **Multi-tenant B2B SaaS** architecture with Row-Level Security
+- **Staff Mode MVP** with role-based access, inventory management, and analytics dashboards
 - **Live at [vinny.chat](https://vinny.chat)** with anonymous guest access
 
 ## Project Status
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| Phases 1–19 | ✅ | Core RAG, hybrid search, reranking, multi-source tools, streaming UX |
-| Multi-Tenant B2B | ✅ | Architecture designed, RLS policies implemented, tenant isolation verified |
+| Phases 1–11 | ✅ | Core RAG, hybrid search (FTS + vector + RRF + Cohere reranking), food pairing engine, Grapeminds live API |
+| Phase 15: Multi-Tenant Foundation | ✅ | Tenant schema, RLS policies, slug routing, tenant-scoped chat |
+| Phase 15.5: Pre-Pilot Legal & Safety | ✅ | Terms of service, allergens, rate limit hardening, steering disclosure |
+| Phase 16: Staff Mode MVP | ✅ | Dual-persona prompt, staff tools, role detection |
+| Phase 17.1: Multi-Category Infrastructure | ✅ | Separate `beers`/`spirits`/`cocktails` tables, dedicated HNSW indexes, per-category hybrid search RPCs |
+| Phase 17.2–17.7: Category Data + Tools | 🚧 | WineVybe, TheCocktailDB, Open Brewery DB ingestion; `search_beverages` unified tool; cross-category food pairings |
+| Phase 19: Analytics Foundation | ✅ | Event logging, metrics queries, API routes |
+| Phase 20–21: Steering + Admin Dashboard | ✅ | Operational AI behavior controls, wine CRUD, steering UI, analytics |
 | MCP Server | ✅ | Model Context Protocol server functional |
-| Staff Mode | ✅ | Role-based permissions, inventory management, analytics dashboard |
 
 ---
 
