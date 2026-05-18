@@ -6,7 +6,7 @@
 
 **This repository documents the architecture and design decisions for Vinny. Source code is available upon request for interview processes.**
 
-📄 [Portfolio Case Study](https://jamesshehan.dev/projects/vinny) · 📝 [Blog Deep Dive](https://jamesshehan.dev/blog/two-tier-rag-ai-wine-concierge) · 🍷 [Live Demo](https://vinny.chat) · 📬 [Request Source Access](mailto:james@jamesshehan.dev?subject=Source%20Access%20Request%20—%20Vinny)
+📄 [Portfolio Case Study](https://jamesshehan.dev/projects/vinny) · 📝 [Blog Deep Dive](https://jamesshehan.dev/blog/two-tier-rag-ai-wine-concierge) · 🍷 [Live Demo](https://vinny-v2-murex.vercel.app/) · 📬 [Request Source Access](mailto:james@jamesshehan.dev?subject=Source%20Access%20Request%20—%20Vinny)
 
 ---
 
@@ -143,7 +143,7 @@ See [docs/tech-decisions.md](docs/tech-decisions.md) for detailed ADR excerpts.
 - **MCP server** for extensible tool integration
 - **Multi-tenant B2B SaaS** architecture with Row-Level Security
 - **Staff Mode MVP** with role-based access, inventory management, and analytics dashboards
-- **Live at [vinny.chat](https://vinny.chat)** with anonymous guest access
+- **[Live demo on Vercel](https://vinny-v2-murex.vercel.app/)** with anonymous guest access
 
 ## Project Status
 
