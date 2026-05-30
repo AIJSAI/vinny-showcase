@@ -1,4 +1,4 @@
-# Technical Decisions — Vinny
+# Technical Decisions: Vinny
 
 This document contains excerpts from the project's Architecture Decision Records (ADRs).
 
@@ -12,10 +12,10 @@ This document contains excerpts from the project's Architecture Decision Records
 **Decision**: Use OpenAI's native `dimensions: 512` parameter on `text-embedding-3-large` to reduce embedding size by 3x. Rebuild the HNSW index (migrated from `ivfflat` to `hnsw` for better recall at lower probe counts).
 
 **Consequences**:
-- 3x storage reduction — fits comfortably within free-tier limits.
+- 3x storage reduction, fits comfortably within storage limits.
 - Minimal recall degradation: measured via evaluation framework (ADR-008), precision@5 dropped <2%.
 - All downstream consumers (search functions, reranking pipeline) updated to 512-dim.
-- Cannot mix 1536-dim and 512-dim vectors — migration required full re-embedding.
+- Cannot mix 1536-dim and 512-dim vectors, so migration required full re-embedding.
 
 ---
 
@@ -35,7 +35,7 @@ Both search paths execute in parallel via a single Supabase RPC function that re
 **Consequences**:
 - Exact wine name queries now reliably surface the correct wine.
 - Semantic queries ("something like Barolo but cheaper") still work via vector path.
-- Marginal latency increase (~50ms) from dual search + reranking — acceptable for conversational UX.
+- Marginal latency increase (~50ms) from dual search + reranking, acceptable for conversational UX.
 - RRF k=60 parameter tuned via evaluation framework to balance recall vs. precision.
 
 ---
@@ -43,7 +43,7 @@ Both search paths execute in parallel via a single Supabase RPC function that re
 ## ADR-008: Automated Evaluation Framework
 
 **Status**: Accepted  
-**Context**: Search quality is critical — bad recommendations destroy user trust instantly. Manual testing doesn't scale and can't catch regressions when changing embedding dimensions, search parameters, or reranking models.
+**Context**: Search quality is critical: bad recommendations destroy user trust instantly. Manual testing doesn't scale and can't catch regressions when changing embedding dimensions, search parameters, or reranking models.
 
 **Decision**: Build an automated evaluation suite with:
 - Test query corpus (exact-match, semantic, cross-category, edge cases)
@@ -70,8 +70,8 @@ Both search paths execute in parallel via a single Supabase RPC function that re
 - Hybrid search function applies `tenant_id` filter *within* the search query, not as a post-filter (critical for pgvector HNSW which returns candidates before WHERE clauses)
 
 **Consequences**:
-- Database-level isolation — even raw SQL access can't cross tenant boundaries with RLS enabled.
-- HNSW index is global (not per-tenant) — acceptable for current scale; per-tenant indexes evaluated if catalog sizes diverge significantly.
+- Database-level isolation: even raw SQL access can't cross tenant boundaries with RLS enabled.
+- HNSW index is global (not per-tenant), acceptable for current scale; per-tenant indexes evaluated if catalog sizes diverge significantly.
 - All API routes must set tenant context before any database operation.
 
 ---
@@ -84,7 +84,7 @@ Both search paths execute in parallel via a single Supabase RPC function that re
 **Decision**: Allow anonymous guest access with:
 - Rate limiting via Upstash Redis (X queries per hour per IP)
 - No conversation persistence for anonymous users
-- Soft conversion prompts after N interactions ("Save your preferences — create an account")
+- Soft conversion prompts after N interactions ("Save your preferences, create an account")
 - Full access (history, preferences, saved wines) behind optional authentication
 
 **Consequences**:
@@ -97,7 +97,7 @@ Both search paths execute in parallel via a single Supabase RPC function that re
 ## ADR-012: Staff Mode
 
 **Status**: Accepted  
-**Context**: Restaurant staff need capabilities beyond what customers use — inventory management, analytics dashboards, catalog curation. These features must be access-controlled to prevent customers from modifying restaurant data.
+**Context**: Restaurant staff need capabilities beyond what customers use: inventory management, analytics dashboards, catalog curation. These features must be access-controlled to prevent customers from modifying restaurant data.
 
 **Decision**: Implement role-based staff mode:
 - `role` column on user profiles: `guest`, `customer`, `staff`, `admin`
@@ -112,15 +112,15 @@ Both search paths execute in parallel via a single Supabase RPC function that re
 
 ---
 
-## ADR-013: Integration Hub Strategy — Clean API Surfaces, Not Custom Middleware
+## ADR-013: Integration Hub Strategy (Clean API Surfaces, Not Custom Middleware)
 
 **Status**: Accepted
-**Context**: As Vinny's integration surface grows (Toast POS, Provi distributor ordering, future Zapier/Make connections), the same N×M integration problem that enterprise iPaaS platforms (MuleSoft, Boomi, Workato) solve at scale could emerge. The naive instinct is to build a central hub. But Vinny's domain has well-established players — Olo (with Omnivore API), Deliverect, Chowly — that already solve the restaurant-POS hub problem.
+**Context**: As Vinny's integration surface grows (Toast POS, Provi distributor ordering, future Zapier/Make connections), the same N×M integration problem that enterprise iPaaS platforms (MuleSoft, Boomi, Workato) solve at scale could emerge. The naive instinct is to build a central hub. But Vinny's domain has well-established players (Olo with the Omnivore API, Deliverect, Chowly) that already solve the restaurant-POS hub problem.
 
 **Decision**: Do **not** build integration hub middleware. Design clean API surfaces so Vinny plugs *into* existing hubs when partners come calling.
 
 What Vinny builds day one:
-- **OpenAPI spec** for all API routes — enables partner integrations without bespoke work
+- **OpenAPI spec** for all API routes, enables partner integrations without bespoke work
 - **Webhook events** for state changes (wine 86'd, steering updated, menu changed)
 - **OAuth2 scopes** for partner access (Toast, Provi, POS integrations)
 
@@ -132,29 +132,29 @@ What Vinny uses when needed:
 **Consequences**:
 - Vinny stays focused on beverage intelligence, not middleware engineering.
 - Clean API surfaces mean Olo, Toast, and other hubs can integrate Vinny without bespoke work on either side.
-- If middleware ever becomes the right move (10+ integrations, enterprise-tier customers), the decision is reversible — the OpenAPI surface and webhook events are the foundation a hub would sit on top of.
+- If middleware ever becomes the right move (10+ integrations, enterprise-tier customers), the decision is reversible: the OpenAPI surface and webhook events are the foundation a hub would sit on top of.
 
 ---
 
-## ADR-014: Multi-Category Schema — Separate Tables per Beverage Category
+## ADR-014: Multi-Category Schema (Separate Tables per Beverage Category)
 
 **Status**: Accepted (Phase 17)
 **Context**: Phase 17 expands Vinny from wine-only to a unified beverage intelligence platform covering beer, spirits, cocktails, and cross-category food pairings. The core schema question: store catalog data for four fundamentally different beverage categories how?
 
 Two options evaluated:
-1. **Polymorphic `beverages` table** — single table with a `category` discriminator, shared columns, category-specific data in JSONB or nullable columns.
-2. **Separate tables per category** — `beers`, `spirits`, `cocktails` alongside `wines`, each with typed columns and dedicated HNSW indexes.
+1. **Polymorphic `beverages` table**: single table with a `category` discriminator, shared columns, category-specific data in JSONB or nullable columns.
+2. **Separate tables per category**: `beers`, `spirits`, `cocktails` alongside `wines`, each with typed columns and dedicated HNSW indexes.
 
 **Decision**: Separate tables per category. Each gets typed columns, its own HNSW vector index, its own GIN FTS index, and its own hybrid search RPC.
 
 **Rationale**:
-- **Column divergence is fundamental, not incidental** — wine has 15+ wine-specific columns; beer needs `ibu`/`srm`/`style`/`substyle`; spirits need `proof`/`age_statement`/`cask_type`/`botanicals`; cocktails need `ingredients` JSONB, `technique`, `glassware`, `family`, `ice_type`. A polymorphic table ends up with 50+ mostly-NULL columns and degraded index efficiency.
-- **Vector space coherence** — separate HNSW indexes produce better recall. A query for "hoppy IPA" won't pull wine vectors into the candidate set.
-- **RPC type safety** — existing `hybrid_search_wines` uses typed filter parameters (`filter_variety`, `filter_min_body`). Same pattern extends cleanly to `hybrid_search_beers(filter_style, filter_min_ibu)` and so on. A polymorphic approach would require either a single RPC with 30+ nullable parameters or runtime dispatch logic inside the RPC.
-- **Additive migration** — the `wines` table and `hybrid_search_wines` RPC are never modified. Zero regression risk to existing wine functionality.
+- **Column divergence is fundamental, not incidental**: wine has 15+ wine-specific columns; beer needs `ibu`/`srm`/`style`/`substyle`; spirits need `proof`/`age_statement`/`cask_type`/`botanicals`; cocktails need `ingredients` JSONB, `technique`, `glassware`, `family`, `ice_type`. A polymorphic table ends up with 50+ mostly-NULL columns and degraded index efficiency.
+- **Vector space coherence**: separate HNSW indexes produce better recall. A query for "hoppy IPA" won't pull wine vectors into the candidate set.
+- **RPC type safety**: existing `hybrid_search_wines` uses typed filter parameters (`filter_variety`, `filter_min_body`). Same pattern extends cleanly to `hybrid_search_beers(filter_style, filter_min_ibu)` and so on. A polymorphic approach would require either a single RPC with 30+ nullable parameters or runtime dispatch logic inside the RPC.
+- **Additive migration**: the `wines` table and `hybrid_search_wines` RPC are never modified. Zero regression risk to existing wine functionality.
 
 **Consequences**:
-- More tables and RPCs to maintain (3 new tables, 3 new hybrid search RPCs, 3 new index sets) — manageable because they follow identical patterns.
-- Cross-category queries (e.g., "what pairs with steak?") require fan-out — handled by `search_beverage_pairings` against a `food_pairings` table unified by a `beverage_domain` column.
+- More tables and RPCs to maintain (3 new tables, 3 new hybrid search RPCs, 3 new index sets), manageable because they follow identical patterns.
+- Cross-category queries (e.g., "what pairs with steak?") require fan-out, handled by `search_beverage_pairings` against a `food_pairings` table unified by a `beverage_domain` column.
 - The unified `search_beverages` tool absorbs complexity: the LLM sees one tool with a category discriminator; the backend dispatches to the appropriate RPC.
-- Tenant-scoped `enabledCategories` config controls which categories each tenant exposes — supports future product forks (e.g., a standalone "Beer Expert" deployment is the same codebase with `enabledCategories: ['beer']`).
+- Tenant-scoped `enabledCategories` config controls which categories each tenant exposes, which supports future product forks (e.g., a standalone "Beer Expert" deployment is the same codebase with `enabledCategories: ['beer']`).
