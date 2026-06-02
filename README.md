@@ -33,7 +33,7 @@ flowchart LR
     end
 
     subgraph RAG["Hybrid Search Pipeline"]
-        EMB["text-embedding-3-large\n(512-dim)"]
+        EMB["text-embedding-3-small\n(1536-dim halfvec)"]
         VEC["pgvector HNSW\n(cosine similarity)"]
         FTS["tsvector\n(full-text search)"]
         RRF["Reciprocal Rank Fusion\n(k=60)"]
@@ -81,11 +81,12 @@ flowchart LR
 | Vercel AI SDK v6 | LLM orchestration | `streamText`, `useChat`, tool definitions, multi-step agent loops |
 | OpenAI GPT-4.1 / GPT-4.1-mini | Language model | Tool-use optimized, Structured Outputs, cost-tiered (mini for simple queries) |
 | Supabase (Postgres) | Primary database | pgvector extension for embeddings, row-level security for multi-tenancy |
-| pgvector (HNSW, 512-dim) | Vector similarity search | Managed via Supabase, cosine similarity with HNSW indexing |
+| pgvector (HNSW, 1536-dim halfvec) | Vector similarity search | Managed via Supabase, cosine similarity with HNSW indexing |
 | tsvector | Full-text keyword search | Native Postgres FTS, zero additional infrastructure |
 | Cohere rerank-v3.5 | Search reranking | Dedicated relevance model, improves precision over raw fusion scores |
 | Upstash Redis | Rate limiting + caching | Serverless Redis, per-user rate limits, conversation context cache |
-| Grapeminds API | Wine data source | Curated wine database with pricing, reviews, and tasting notes |
+| X-Wines dataset (CC0) | Wine catalog source | ~100K openly licensed wines, clean for commercial use |
+| Grapeminds API | Live wine API | Curated wine database with pricing, reviews, and tasting notes |
 | WineVybe API | Beer + spirits data | Primary source of record for beer (IBU/SRM/style) and spirits (proof/age/cask) catalog data |
 | TheCocktailDB | Cocktail data | Multi-ingredient filtering, glassware, technique, family |
 | Open Brewery DB | Brewery metadata | 9,527 breweries, free, no auth |
@@ -97,9 +98,9 @@ flowchart LR
 
 ### 1. Free-Tier Vector Storage Limits
 
-**Challenge**: Supabase free tier has limited storage. Original `text-embedding-3-large` produces 1536-dimensional vectors, and each row consumes significant storage, and HNSW index memory grows proportionally with dimensionality.
+**Challenge**: Supabase free tier has limited storage. `text-embedding-3-small` produces 1536-dimensional vectors natively, each row consumes significant storage, and HNSW index memory grows proportionally with dimensionality.
 
-**Solution**: Reduced embedding dimensions from 1536 to 512 via OpenAI's native `dimensions` parameter (ADR-004). Rebuilt HNSW index with `ivfflat` → `hnsw` upgrade. 3x storage reduction with minimal recall degradation (measured via evaluation suite).
+**Solution**: First reduced embedding dimensions to 512 via OpenAI's native `dimensions` parameter (ADR-004) for a 3x storage reduction with minimal recall loss (measured via the evaluation suite). Later modernized to the full native 1536 dimensions stored as Postgres `halfvec(1536)`: half-precision (2 bytes per component) keeps the larger vectors affordable while restoring full retrieval fidelity.
 
 ### 2. Exact Name Queries Miss with Vector Search
 
@@ -123,7 +124,7 @@ flowchart LR
 
 | ADR | Decision | Rationale |
 |-----|----------|-----------|
-| ADR-004 | 512-dim embeddings | 3x storage reduction vs. 1536-dim, minimal recall loss, fits free-tier limits |
+| ADR-004 | Embedding dimensions | Started 512-dim for free-tier storage, later native 1536-dim stored as halfvec(1536) for full fidelity |
 | ADR-007 | Hybrid Search (pgvector + tsvector + RRF) | Vector alone misses exact-match; keyword alone misses semantic; fusion catches both |
 | ADR-008 | Automated Evaluation Framework | Regression suite with test queries, expected results, and scored metrics for search quality |
 | ADR-009 | Multi-Tenant Data Model | Row-Level Security + tenant_id partitioning for B2B SaaS isolation |
@@ -137,7 +138,7 @@ See [docs/tech-decisions.md](docs/tech-decisions.md) for detailed ADR excerpts.
 ## Results
 
 - **21 development phases** complete plus Phase 17 multi-category in active rollout
-- **107K+ wine reviews + 100K+ wine catalog + 5K+ food pairings** plus beer, spirits, and cocktail catalogs ingested through Phase 17
+- **~100K wine catalog (CC0 X-Wines) + 5K+ food pairings**, with the multi-category schema (beer, spirits, cocktails) live and category data ingestion in progress
 - **Hybrid search pipeline** with measured precision improvements over vector-only
 - **Multi-category data model**: separate `wines`/`beers`/`spirits`/`cocktails` tables with dedicated HNSW indexes and per-category hybrid search RPCs
 - **MCP server** for extensible tool integration

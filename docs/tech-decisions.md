@@ -4,18 +4,18 @@ This document contains excerpts from the project's Architecture Decision Records
 
 ---
 
-## ADR-004: 512-Dimensional Embeddings
+## ADR-004: Embedding Dimensions (512-dim, later halfvec(1536))
 
-**Status**: Accepted  
-**Context**: Supabase free tier imposes storage limits. The default output of `text-embedding-3-large` is 1536 dimensions per vector. With 107K+ wine records, each embedding row consumes significant storage, and the HNSW index memory footprint grows proportionally.
+**Status**: Accepted, later revised  
+**Context**: Supabase free tier imposes storage limits. `text-embedding-3-small` produces 1536 dimensions per vector natively. Across the wine catalog, each embedding row consumes significant storage, and the HNSW index memory footprint grows proportionally with dimensionality.
 
-**Decision**: Use OpenAI's native `dimensions: 512` parameter on `text-embedding-3-large` to reduce embedding size by 3x. Rebuild the HNSW index (migrated from `ivfflat` to `hnsw` for better recall at lower probe counts).
+**Decision**: Initially used OpenAI's native `dimensions: 512` parameter on `text-embedding-3-small` to reduce embedding size by 3x. The catalog was later re-embedded at the full native 1536 dimensions, stored as Postgres `halfvec(1536)`: half-precision (2 bytes per component) keeps the larger vectors affordable while restoring full retrieval fidelity.
 
 **Consequences**:
-- 3x storage reduction, fits comfortably within storage limits.
-- Minimal recall degradation: measured via evaluation framework (ADR-008), precision@5 dropped <2%.
-- All downstream consumers (search functions, reranking pipeline) updated to 512-dim.
-- Cannot mix 1536-dim and 512-dim vectors, so migration required full re-embedding.
+- The original 512-dim build cut storage 3x with minimal recall loss (precision@5 dropped <2%, measured via the evaluation framework in ADR-008).
+- The later halfvec(1536) build carries full native dimensionality without breaking the free-tier storage budget.
+- Changing dimensions requires a full re-embedding, since vectors of different widths cannot be mixed.
+- All downstream consumers (search functions, reranking pipeline) track the current `halfvec(1536)` representation.
 
 ---
 
