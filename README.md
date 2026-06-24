@@ -1,6 +1,6 @@
 # Vinny: AI Beverage Concierge
 
-> Multi-source RAG beverage recommendation engine with hybrid search, multi-category data model (wine, beer, spirits, cocktails), cross-category food pairings, conversational UX, and multi-tenant B2B SaaS architecture.
+> Multi-source RAG beverage recommendation engine with hybrid search, multi-category data model (wine, beer, spirits, cocktails), cross-category food pairings, conversational UX, and multi-tenant architecture.
 
 ---
 
@@ -110,7 +110,7 @@ flowchart LR
 
 ### 3. Multi-Tenant Data Isolation
 
-**Challenge**: B2B SaaS architecture requires per-restaurant data isolation. pgvector HNSW indexes return candidates *before* SQL WHERE filters are applied, so a restaurant's query could surface wines from another restaurant's catalog in the candidate set.
+**Challenge**: Multi-tenant architecture requires per-tenant data isolation. pgvector HNSW indexes return candidates *before* SQL WHERE filters are applied, so one tenant's query could surface items from another tenant's catalog in the candidate set.
 
 **Solution**: Iterative index scans with RLS (ADR-009). Supabase Row-Level Security policies filter at the database level. The hybrid search function applies `tenant_id` filters within the search query itself, not as a post-filter. Combined with connection-level RLS context (`set_config('app.tenant_id', ...)`), isolation is enforced at every layer.
 
@@ -127,10 +127,10 @@ flowchart LR
 | ADR-004 | Embedding dimensions | Started 512-dim for free-tier storage, later native 1536-dim stored as halfvec(1536) for full fidelity |
 | ADR-007 | Hybrid Search (pgvector + tsvector + RRF) | Vector alone misses exact-match; keyword alone misses semantic; fusion catches both |
 | ADR-008 | Automated Evaluation Framework | Regression suite with test queries, expected results, and scored metrics for search quality |
-| ADR-009 | Multi-Tenant Data Model | Row-Level Security + tenant_id partitioning for B2B SaaS isolation |
-| ADR-011 | Consumer Anonymous Access | Guest users get rate-limited access without auth; conversion funnel optimization |
-| ADR-012 | Staff Mode | Restaurant staff get elevated access (inventory management, analytics) via role-based permissions |
-| ADR-013 | Integration Hub Strategy (don't build middleware) | Design clean API surfaces (OpenAPI + webhooks + OAuth2) so Vinny plugs into Olo/Toast/Provi via existing hubs instead of becoming one |
+| ADR-009 | Multi-Tenant Data Model | Row-Level Security + tenant_id partitioning for multi-tenant isolation |
+| ADR-011 | Consumer Anonymous Access | Guest users get rate-limited access without auth to lower the barrier to first use |
+| ADR-012 | Staff Mode | A staff role gets elevated access (inventory management, analytics) via role-based permissions |
+| ADR-013 | Integration Hub Strategy (don't build middleware) | Design clean API surfaces (OpenAPI + webhooks + OAuth2) so Vinny plugs into existing integration hubs instead of becoming one |
 | ADR-014 | Multi-Category Schema (separate tables) | Polymorphic `beverages` would collapse under column divergence; separate tables preserve vector-space coherence, RPC type safety, and additive migrations |
 
 See [docs/tech-decisions.md](docs/tech-decisions.md) for detailed ADR excerpts.
@@ -142,8 +142,8 @@ See [docs/tech-decisions.md](docs/tech-decisions.md) for detailed ADR excerpts.
 - **Hybrid search pipeline** with measured precision improvements over vector-only
 - **Multi-category data model**: separate `wines`/`beers`/`spirits`/`cocktails` tables with dedicated HNSW indexes and per-category hybrid search RPCs
 - **MCP server** for extensible tool integration
-- **Multi-tenant B2B SaaS** architecture with Row-Level Security
-- **Staff Mode MVP** with role-based access, inventory management, and analytics dashboards
+- **Multi-tenant architecture** with Row-Level Security
+- **Staff Mode** with role-based access, inventory management, and analytics dashboards
 - **[Live demo on Vercel](https://vinny-v2-murex.vercel.app/)** with anonymous guest access
 
 ## Project Status
@@ -152,8 +152,8 @@ See [docs/tech-decisions.md](docs/tech-decisions.md) for detailed ADR excerpts.
 |-------|--------|-------------|
 | Phases 1-11 | ✅ | Core RAG, hybrid search (FTS + vector + RRF + Cohere reranking), food pairing engine, Grapeminds live API |
 | Phase 15: Multi-Tenant Foundation | ✅ | Tenant schema, RLS policies, slug routing, tenant-scoped chat |
-| Phase 15.5: Pre-Pilot Legal & Safety | ✅ | Terms of service, allergens, rate limit hardening, steering disclosure |
-| Phase 16: Staff Mode MVP | ✅ | Dual-persona prompt, staff tools, role detection |
+| Phase 15.5: Legal & Safety Hardening | ✅ | Terms of service, allergens, rate limit hardening, steering disclosure |
+| Phase 16: Staff Mode | ✅ | Dual-persona prompt, staff tools, role detection |
 | Phase 17.1: Multi-Category Infrastructure | ✅ | Separate `beers`/`spirits`/`cocktails` tables, dedicated HNSW indexes, per-category hybrid search RPCs |
 | Phase 17.2-17.7: Category Data + Tools | 🚧 | WineVybe, TheCocktailDB, Open Brewery DB ingestion; `search_beverages` unified tool; cross-category food pairings |
 | Phase 19: Analytics Foundation | ✅ | Event logging, metrics queries, API routes |
