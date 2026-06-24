@@ -96,9 +96,9 @@ flowchart LR
 
 ## Technical Challenges & Solutions
 
-### 1. Free-Tier Vector Storage Limits
+### 1. Vector Storage Efficiency at Scale
 
-**Challenge**: Supabase free tier has limited storage. `text-embedding-3-small` produces 1536-dimensional vectors natively, each row consumes significant storage, and HNSW index memory grows proportionally with dimensionality.
+**Challenge**: `text-embedding-3-small` produces 1536-dimensional vectors natively; each row consumes storage and HNSW index memory grows with dimensionality, so a naive deployment burns storage and index RAM fast.
 
 **Solution**: First reduced embedding dimensions to 512 via OpenAI's native `dimensions` parameter (ADR-004) for a 3x storage reduction with minimal recall loss (measured via the evaluation suite). Later modernized to the full native 1536 dimensions stored as Postgres `halfvec(1536)`: half-precision (2 bytes per component) keeps the larger vectors affordable while restoring full retrieval fidelity.
 
@@ -124,7 +124,7 @@ flowchart LR
 
 | ADR | Decision | Rationale |
 |-----|----------|-----------|
-| ADR-004 | Embedding dimensions | Started 512-dim for free-tier storage, later native 1536-dim stored as halfvec(1536) for full fidelity |
+| ADR-004 | Embedding dimensions | Started 512-dim for storage/index efficiency, later native 1536-dim stored as halfvec(1536) for full fidelity |
 | ADR-007 | Hybrid Search (pgvector + tsvector + RRF) | Vector alone misses exact-match; keyword alone misses semantic; fusion catches both |
 | ADR-008 | Automated Evaluation Framework | Regression suite with test queries, expected results, and scored metrics for search quality |
 | ADR-009 | Multi-Tenant Data Model | Row-Level Security + tenant_id partitioning for multi-tenant isolation |
