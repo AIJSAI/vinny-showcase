@@ -4,9 +4,9 @@
 
 ---
 
-**This repository documents the architecture and design decisions for Vinny. Source code is available on request.**
+**This repository documents the architecture and design decisions for Vinny. The implementation is private.**
 
-📄 [Portfolio Case Study](https://jamesshehan.dev/projects/vinny) · 📝 [Blog Deep Dive](https://jamesshehan.dev/blog/two-tier-rag-ai-wine-concierge) · 🍷 [Live Demo](https://vinny-v2-murex.vercel.app/) · 📬 [Request Source Access](mailto:james@jamesshehan.dev?subject=Source%20Access%20Request%20-%20Vinny)
+📄 [Portfolio Case Study](https://jamesshehan.dev/projects/vinny) · 📝 [Blog Post](https://jamesshehan.dev/blog/two-tier-rag-ai-wine-concierge) · 🍷 [Live Demo](https://vinny-v2-murex.vercel.app/)
 
 ---
 
@@ -164,4 +164,3 @@ See [docs/tech-decisions.md](docs/tech-decisions.md) for detailed ADR excerpts.
 
 **Built by [James Shehan](https://jamesshehan.dev)** · TPM / Solutions Architect
 
-📬 [Request source access](mailto:james@jamesshehan.dev?subject=Source%20Access%20Request%20-%20Vinny)
