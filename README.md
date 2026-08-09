@@ -162,5 +162,5 @@ See [docs/tech-decisions.md](docs/tech-decisions.md) for detailed ADR excerpts.
 
 ---
 
-**Built by [James Shehan](https://jamesshehan.dev)** · TPM / Solutions Architect
+**Built by [James Shehan](https://jamesshehan.dev)**
 
