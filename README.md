@@ -104,13 +104,13 @@ flowchart LR
 
 ### 2. Exact Name Queries Miss with Vector Search
 
-**Challenge**: Users frequently search for specific wines by name ("2019 Caymus Cabernet"). Vector search returns semantically similar wines but misses exact string matches: "2019 Caymus" might rank below "2020 Silver Oak" because the embeddings are close in vector space.
+**Challenge**: People often search for a specific wine by name ("2019 Caymus Cabernet"). Vector search returns semantically similar wines but misses exact string matches: "2019 Caymus" might rank below "2020 Silver Oak" because the embeddings are close in vector space.
 
 **Solution**: Hybrid search architecture (ADR-007). Added `tsvector` full-text search column alongside pgvector. Both search paths run in parallel, results fused via Reciprocal Rank Fusion (RRF, k=60), then reranked by Cohere. Exact name matches now surface reliably while semantic queries still work.
 
 ### 3. Per-Venue Data Isolation
 
-**Challenge**: Each venue that runs Vinny needs its own catalog, kept apart from every other venue's. pgvector HNSW indexes return candidates *before* SQL WHERE filters are applied, so one venue's query could surface items from another venue's catalog in the candidate set.
+**Challenge**: Vinny is designed to serve more than one venue, and each venue's catalog has to stay apart from every other venue's. pgvector HNSW indexes return candidates *before* SQL WHERE filters are applied, so one venue's query could surface items from another venue's catalog in the candidate set.
 
 **Solution**: Iterative index scans with RLS (ADR-009). Supabase Row-Level Security policies filter at the database level. The hybrid search function applies `tenant_id` filters within the search query itself, not as a post-filter. Combined with connection-level RLS context (`set_config('app.tenant_id', ...)`), isolation is enforced in the database and in the search query.
 
@@ -118,7 +118,7 @@ flowchart LR
 
 **Challenge**: The multi-category work expanded Vinny from wine-only to wine + beer + spirits + cocktails. The naive design is a polymorphic `beverages` table with a category discriminator and a wide column set. That approach does not hold up: wine has 15+ wine-specific columns (`points`, `variety`, `winery`, `body`, `acidity`, `harmonize`), beer needs `ibu`/`srm`/`style`, spirits need `proof`/`age_statement`/`cask_type`, cocktails need `ingredients` JSONB, `technique`, `glassware`, `family`. A unified table ends up with 50+ mostly-NULL columns and degraded index efficiency. Worse, a unified HNSW index mixes wine vectors into "hoppy IPA" candidate sets, degrading recall.
 
-**Solution**: Separate tables per category (ADR-014). `wines`, `beers`, `spirits`, `cocktails` each get typed columns, dedicated HNSW vector indexes, GIN FTS indexes, and category-specific hybrid search RPCs. Vector spaces stay semantically coherent. RPCs stay type-safe. Cross-category queries (e.g., "what pairs with steak?") are handled by the `search_beverage_pairings` RPC against a `food_pairings` table unified by a `beverage_domain` column. The LLM sees one `search_beverages` tool with a category discriminator; the backend fans out. A per-venue `enabledCategories` setting gates which categories each venue exposes. Migration is purely additive: the existing `wines` table and `hybrid_search_wines` RPC are never touched.
+**Solution**: Separate tables per category (ADR-014). `wines`, `beers`, `spirits`, `cocktails` each get typed columns, dedicated HNSW vector indexes, GIN FTS indexes, and category-specific hybrid search RPCs. Vector spaces stay semantically coherent. RPCs stay type-safe. Cross-category queries (e.g., "what pairs with steak?") are handled by the `search_beverage_pairings` RPC against a `food_pairings` table unified by a `beverage_domain` column. The LLM will see one `search_beverages` tool with a category discriminator, and the backend fans out (in progress). A per-venue `enabledCategories` setting gates which categories each venue exposes. Migration is purely additive: the existing `wines` table and `hybrid_search_wines` RPC are never touched.
 
 ## Key Decisions
 
@@ -137,7 +137,7 @@ ADR = architecture decision record: a short written note of each design choice a
 
 ## Results
 
-- **Search tool and schema extended to beer, spirits and cocktails**; loading their data is in progress
+- **Schema extended to beer, spirits and cocktails**; their data loading and the unified `search_beverages` tool are in progress
 - **~100K wine catalog (CC0 X-Wines) + 5K+ food pairings**
 - **Hybrid search pipeline** (vector + keyword + Cohere reranking) instead of vector search alone
 - **Multi-category data model**: separate `wines`/`beers`/`spirits`/`cocktails` tables with dedicated HNSW indexes and per-category hybrid search RPCs
