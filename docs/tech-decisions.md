@@ -61,7 +61,7 @@ Both search paths execute in parallel via a single Supabase RPC function that re
 ## ADR-009: Multi-Tenant Data Model
 
 **Status**: Accepted  
-**Context**: B2B SaaS model requires per-restaurant data isolation. Each restaurant has its own wine catalog, pricing, and customer interactions. A shared database with row-level filtering must prevent cross-tenant data leakage at every layer.
+**Context**: Each venue that runs Vinny needs its own wine catalog, pricing and conversations, kept apart from every other venue's. A shared database with row-level filtering must prevent cross-tenant data leakage at every layer.
 
 **Decision**:
 - `tenant_id` column on all tenant-scoped tables (wines, conversations, analytics)
@@ -132,7 +132,7 @@ What Vinny uses when needed:
 **Consequences**:
 - Vinny stays focused on beverage intelligence, not middleware engineering.
 - Clean API surfaces mean Olo, Toast, and other hubs can integrate Vinny without bespoke work on either side.
-- If middleware ever becomes the right move (10+ integrations, enterprise-tier customers), the decision is reversible: the OpenAPI surface and webhook events are the foundation a hub would sit on top of.
+- If middleware ever becomes the right move (10+ integrations, enterprise-scale use), the decision is reversible: the OpenAPI surface and webhook events are the foundation a hub would sit on top of.
 
 ---
 
