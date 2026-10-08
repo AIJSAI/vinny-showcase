@@ -4,111 +4,109 @@ This document contains excerpts from the project's Architecture Decision Records
 
 ---
 
-## ADR-004: Embedding Dimensions (512-dim, later halfvec(1536))
+## ADR-004: Keep Vintage Years in Wine Embedding Text
 
-**Status**: Accepted, later revised  
-**Context**: Supabase free tier imposes storage limits. `text-embedding-3-small` produces 1536 dimensions per vector natively. Across the wine catalog, each embedding row consumes significant storage, and the HNSW index memory footprint grows proportionally with dimensionality.
+**Status**: Accepted  
+**Context**: The original wine review dataset is a snapshot from around 2017, and wine titles carry vintage years ("Château Margaux 2015") that end up in the embedded text. The concern was that the years could bias search toward specific bottles no longer on shelves, or lead the assistant to recommend "the 2014 Barolo" when the 2021 is what's available.
 
-**Decision**: Initially used OpenAI's native `dimensions: 512` parameter on `text-embedding-3-small` to reduce embedding size by 3x. The catalog was later re-embedded at the full native 1536 dimensions, stored as Postgres `halfvec(1536)`: half-precision (2 bytes per component) keeps the larger vectors affordable while restoring full retrieval fidelity.
+**Decision**: Keep vintage years in the embedding text as-is. Handle how vintages are presented in the prompt layer, not the data layer.
 
 **Consequences**:
-- The original 512-dim build cut storage 3x with minimal recall loss (precision@5 dropped <2%, measured via the evaluation framework in ADR-008).
-- The later halfvec(1536) build carries full native dimensionality without breaking the free-tier storage budget.
-- Changing dimensions requires a full re-embedding, since vectors of different widths cannot be mixed.
-- All downstream consumers (search functions, reranking pipeline) track the current `halfvec(1536)` representation.
+- A four-digit year is about one token out of 50 to 150 per wine, so it barely moves cosine similarity; searches like "bold red for steak" match on flavor, region and variety, not year.
+- Vintage character (a hot or a cool year) is real taste information, and descriptions mention vintages too, so stripping years would remove valid signal.
+- The system prompt tells Vinny to recommend by producer, style and region rather than specific vintage bottles.
+- If vintage-aware recommendations are ever wanted ("best 2015 Bordeaux"), the data already supports them without re-ingestion.
 
 ---
 
 ## ADR-007: Hybrid Search (pgvector + tsvector + RRF)
 
 **Status**: Accepted  
-**Context**: Pure vector search fails on exact-match queries. A user searching "2019 Caymus Cabernet Sauvignon" expects that exact wine, but vector similarity may rank semantically similar wines higher. Conversely, pure keyword search fails on conceptual queries like "bold Italian red under $30."
+**Context**: Vector-only search failed on exact name searches during wine bar field testing. "Caymus Cabernet" returned semantically similar Cabernet Sauvignons rather than the specific Caymus wine, because the embedding captures the *concept* of a full-bodied Napa Cab rather than the *name*. Pure keyword search has the opposite problem on conceptual queries like "bold Italian red under $30."
 
 **Decision**: Implement a hybrid search pipeline:
 1. **pgvector** cosine similarity search (semantic understanding)
 2. **tsvector** full-text search (exact keyword matching, with stemming and ranking)
-3. **Reciprocal Rank Fusion** (RRF, k=60) to merge and de-duplicate results from both paths
-4. **Cohere rerank-v3.5** to re-score the fused candidate list by query relevance
+3. **Reciprocal Rank Fusion** (RRF, default k=50) to merge and de-duplicate results from both paths, with tunable keyword and semantic weights
+4. **Cohere reranking** (added in a later phase, now rerank-v4.0-fast) to re-score the fused candidate list by query relevance
 
-Both search paths execute in parallel via a single Supabase RPC function that returns the fused, reranked results.
+A single Supabase RPC runs both searches and returns the fused list, and the reranker re-scores it in the app. Metadata filters (variety, country, region, points, price) run as SQL `WHERE` clauses, so a constraint like "under $50" holds exactly.
 
 **Consequences**:
 - Exact wine name queries now reliably surface the correct wine.
 - Semantic queries ("something like Barolo but cheaper") still work via vector path.
-- Marginal latency increase (~50ms) from dual search + reranking, acceptable for conversational UX.
-- RRF k=60 parameter tuned via evaluation framework to balance recall vs. precision.
+- Both tsvector and pgvector are built into Supabase Postgres, so no external search service is needed.
+- The keyword weight, semantic weight and RRF constant need empirical tuning, starting from Supabase's recommended defaults.
 
 ---
 
-## ADR-008: Automated Evaluation Framework
+## ADR-008: Evaluation Framework (SommBench-Inspired)
 
 **Status**: Accepted  
-**Context**: Search quality is critical: bad recommendations destroy user trust instantly. Manual testing doesn't scale and can't catch regressions when changing embedding dimensions, search parameters, or reranking models.
+**Context**: Wine AI models are prone to hallucination and positivity bias, recommending wines confidently without grounded evidence. The SommBench benchmark (March 2026) defined three evaluation axes for wine AI (theory knowledge, food and wine pairing, and wine feature prediction) but published no code or data. Vinny needed its own evaluation to quantify recommendation quality and catch regressions.
 
-**Decision**: Build an automated evaluation suite with:
-- Test query corpus (exact-match, semantic, cross-category, edge cases)
-- Expected result sets per query
-- Scored metrics: precision@k, recall@k, MRR (Mean Reciprocal Rank)
-- Regression gates: CI blocks merges if metrics drop below thresholds
+**Decision**: Build a dedicated Vitest evaluation suite (`npm run test:eval`), kept out of the standard test run because it calls live models and data. As built, it checks:
+- **Retrieval quality**: hit rate and mean reciprocal rank on wine queries whose correct answers come straight from the catalog, never from the search path under test.
+- **Wine recall gate**: fails when recall at 10 drops more than 3 points below a committed baseline.
+- **Grounded recommendations**: every specific bottle the model names must match a real catalog row on name, producer, ABV, vintage and price; an honest decline passes.
+- **Pairing judgment**: the production chat model rates good and bad pairings against authored labels, including deliberately bad ones, to surface approval bias.
 
 **Consequences**:
-- ADR-004 (512-dim migration) validated via evaluation before deployment.
-- Search parameter changes (RRF k, rerank model, embedding model) can be A/B tested quantitatively.
-- Test corpus maintenance required as wine catalog evolves.
+- Search and model changes are compared on numbers instead of impressions.
+- The suite runs against the configured production model, so a model swap is measured, not assumed.
+- Live model calls vary between runs, so the gates compare against a baseline with a tolerance instead of exact matches.
+- The ground-truth data has to grow as Vinny's categories and features do.
 
 ---
 
-## ADR-009: Multi-Tenant Data Model
+## ADR-009: Separate Per-Venue Menu Table
 
 **Status**: Accepted  
-**Context**: Each venue that runs Vinny needs its own wine catalog, pricing and conversations, kept apart from every other venue's. A shared database with row-level filtering must prevent cross-tenant data leakage at every layer.
+**Context**: The `wines` table is a global knowledge base: public reviews, tasting notes, embeddings and metadata that serve every user equally. Each venue also needs its own wine menu, with its own pricing, by-the-glass status and availability. The question was whether to add a `tenant_id` to `wines` or create a separate table. Vector search adds a second problem: pgvector HNSW indexes return approximate nearest neighbors *before* SQL `WHERE` filters apply, so a venue with a short menu searching a large shared index may get only a handful of results after filtering.
 
 **Decision**:
-- `tenant_id` column on all tenant-scoped tables (wines, conversations, analytics)
-- Supabase Row-Level Security (RLS) policies on all tenant tables
-- Connection-level tenant context via `set_config('app.tenant_id', ...)` at request start
-- Hybrid search function applies `tenant_id` filter *within* the search query, not as a post-filter (critical for pgvector HNSW which returns candidates before WHERE clauses)
+- Keep `wines` as the global, public catalog, and create a separate `tenant_wines` table for each venue's menu, linked to the catalog by `wine_id`.
+- Search the global index, join to the venue's menu, and set `hnsw.iterative_scan = strict_order` so pgvector keeps fetching candidates when the join removes too many.
+- Protect venue tables with row-level security through a security-definer function that resolves the signed-in user's venues from `tenant_members`.
 
 **Consequences**:
-- Database-level isolation: even raw SQL access can't cross tenant boundaries with RLS enabled.
-- HNSW index is global (not per-tenant), acceptable for current scale; per-tenant indexes evaluated if catalog sizes diverge significantly.
-- All API routes must set tenant context before any database operation.
+- No embedding duplication: menus carry no vectors, so there is no per-venue re-indexing.
+- `wines` stays public; only venue-scoped tables need RLS, and their `tenant_id` columns are indexed for policy performance.
+- Iterative index scans require pgvector 0.8.0 or later.
+- Anonymous guests take a separate path through the API (ADR-011), so the API route must scope every query to the right venue.
 
 ---
 
-## ADR-011: Consumer Anonymous Access
+## ADR-011: Two-Path Access (Anonymous QR Guests, Signed-In Admins)
 
 **Status**: Accepted  
-**Context**: Requiring authentication before trying a wine recommendation tool creates unnecessary friction. Most users want to ask one or two questions before deciding if the tool is useful.
+**Context**: Vinny serves two kinds of users with opposite needs. Restaurant guests scan a QR code at the table and should not need an account, since any friction kills adoption, yet they need data scoped to that restaurant's menu. Restaurant admins manage the wine list, steering and analytics, and need full authentication with row-level security. Supabase RLS identifies users by `auth.uid()`, which an anonymous guest does not have.
 
-**Decision**: Allow anonymous guest access with:
-- Rate limiting via Upstash Redis (X queries per hour per IP)
-- No conversation persistence for anonymous users
-- Soft conversion prompts after N interactions ("Save your preferences, create an account")
-- Full access (history, preferences, saved wines) behind optional authentication
+**Decision**: Two paths, with the API route as the trust boundary.
+- **Guests (QR code)**: the venue's slug in the URL is the only input. The API route validates it, resolves the venue id on the server, and passes that id explicitly to every database function. Guests are rate-limited through Upstash Redis.
+- **Admins (dashboard)**: Supabase Auth sign-in, with row-level security policies that resolve the user's venues through a security-definer function (ADR-009).
 
 **Consequences**:
-- Lower friction → higher trial rate.
-- Rate limiting prevents abuse without authentication.
-- Anonymous usage data (aggregated, not per-user) feeds evaluation framework.
+- No sign-up friction for guests, the first product requirement.
+- The slug is public and the venue id is not; the server resolves one to the other.
+- Guest queries rely on the API route rather than RLS, so strict slug validation and an explicit venue id in every database function are mandatory.
+- The service key stays server-side only.
 
 ---
 
-## ADR-012: Staff Mode
+## ADR-012: Staff Mode (Dual-Persona Prompt with Role Detection)
 
-**Status**: Accepted  
-**Context**: Restaurant staff need capabilities beyond what customers use: inventory management, analytics dashboards, catalog curation. These features must be access-controlled to prevent customers from modifying restaurant data.
+**Status**: Proposed in March 2026, then built  
+**Context**: The venue membership table already defined `owner`, `staff` and `viewer` roles, but every prompt, tool and screen was guest-facing. Servers are the real distribution channel: a server who uses Vinny before and during service carries that knowledge to the table, and staff adoption is easier to secure than a change in guest behavior.
 
-**Decision**: Implement role-based staff mode:
-- `role` column on user profiles: `guest`, `customer`, `staff`, `admin`
-- Staff-only API routes gated by role middleware
-- UI conditionally renders staff features (inventory search, analytics, bulk operations)
-- Staff actions logged to audit trail
+**Decision**: Detect the signed-in user's role for the venue and switch personas within the same chat:
+- **Staff and owners** get a concise, service-ready persona and staff-only tools: `generate_talking_points` (a few sentences a server can say at the table about a wine) and `shift_prep` (a pre-shift briefing on featured wines, pairings to suggest and wines that are 86'd).
+- **Guests** keep the warm, exploratory consumer persona.
 
 **Consequences**:
-- Single codebase serves both customer and staff experiences.
-- Role escalation requires admin approval (not self-service).
-- Staff features developed incrementally without affecting customer UX.
+- One codebase and one deployment serve both personas; the switch is a prompt-level change, not an architecture change.
+- Two persona variants add prompt maintenance and testing surface.
+- No schema change was needed, since the staff role already existed.
 
 ---
 
@@ -117,10 +115,8 @@ Both search paths execute in parallel via a single Supabase RPC function that re
 **Status**: Accepted
 **Context**: As Vinny's integration surface grows (Toast POS, Provi distributor ordering, future Zapier/Make connections), the same N×M integration problem that enterprise iPaaS platforms (MuleSoft, Boomi, Workato) solve at scale could emerge. The naive instinct is to build a central hub. But Vinny's domain has well-established players (Olo with the Omnivore API, Deliverect, Chowly) that already solve the restaurant-POS hub problem.
 
-**Decision**: Do **not** build integration hub middleware. Design clean API surfaces so Vinny plugs *into* existing hubs when partners come calling.
-
-What Vinny builds day one:
-- **OpenAPI spec** for all API routes, enables partner integrations without bespoke work
+**Decision**: Do **not** build integration hub middleware. Design clean API surfaces so Vinny plugs *into* existing hubs when partners come calling. The surfaces it commits to, ahead of the first partner integrations on the roadmap:
+- **OpenAPI spec** for all API routes, so partners can integrate without bespoke work
 - **Webhook events** for state changes (wine 86'd, steering updated, menu changed)
 - **OAuth2 scopes** for partner access (Toast, Provi, POS integrations)
 
@@ -132,7 +128,7 @@ What Vinny uses when needed:
 **Consequences**:
 - Vinny stays focused on beverage intelligence, not middleware engineering.
 - Clean API surfaces mean Olo, Toast, and other hubs can integrate Vinny without bespoke work on either side.
-- If middleware ever becomes the right move (10+ integrations, enterprise-scale use), the decision is reversible: the OpenAPI surface and webhook events are the foundation a hub would sit on top of.
+- The decision is revisited past 100 venues or once three or more partner integrations are live; the OpenAPI surface and webhook events are the foundation a hub would sit on.
 
 ---
 
@@ -155,6 +151,6 @@ Two options evaluated:
 
 **Consequences**:
 - More tables and RPCs to maintain (3 new tables, 3 new hybrid search RPCs, 3 new index sets), manageable because they follow identical patterns.
-- Cross-category queries (e.g., "what pairs with steak?") require fan-out, handled by `search_beverage_pairings` against a `food_pairings` table unified by a `beverage_domain` column.
+- Cross-category queries (e.g., "what pairs with steak?") require fan-out, through a `search_beverage_pairings` RPC over a `food_pairings` table unified by a `beverage_domain` column.
 - The unified `search_beverages` tool absorbs complexity: the LLM sees one tool with a category discriminator; the backend dispatches to the appropriate RPC.
-- Tenant-scoped `enabledCategories` config controls which categories each tenant exposes, which supports future product forks (e.g., a standalone "Beer Expert" deployment is the same codebase with `enabledCategories: ['beer']`).
+- A per-venue `enabledCategories` setting controls which categories each venue exposes.
