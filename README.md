@@ -8,6 +8,8 @@
 
 [Portfolio case study](https://jamesshehan.dev/projects/vinny) · [Blog post](https://jamesshehan.dev/blog/two-tier-rag-ai-wine-concierge) · [Live demo](https://vinny-v2-murex.vercel.app/)
 
+Other showcases: [Connect](https://github.com/AIJSAI/connect-voice-ai-showcase) · [Ratify](https://github.com/AIJSAI/ratify-showcase) · [Hive](https://github.com/AIJSAI/hive-showcase) · [On the Lees](https://github.com/AIJSAI/on-the-lees-showcase) · [Backyard](https://github.com/AIJSAI/backyard-showcase) · [The Chief](https://github.com/AIJSAI/operating-partner-showcase)
+
 ---
 
 ## Problem
